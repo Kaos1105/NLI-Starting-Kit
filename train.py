@@ -47,7 +47,8 @@ trainer = WordLevelTrainer(
     min_frequency=2
 )
 
-tokenizer.train_from_iterator(Sentences, trainer=trainer, length=len(Sentences))
+tokenizer.train_from_iterator(
+    Sentences, trainer=trainer, length=len(Sentences))
 
 hf_tokenizer = PreTrainedTokenizerFast(
     tokenizer_object=tokenizer,
@@ -61,33 +62,45 @@ hf_tokenizer = PreTrainedTokenizerFast(
 
 hf_tokenizer.save_pretrained("./MODEL")
 
+
 def collate_fn(batch):
     input_ids = torch.tensor([x["input_ids"] for x in batch])
     lengths = torch.tensor([len(x["input_ids"]) for x in batch])
     labels = torch.tensor([x["labels"] for x in batch])
-    return {"input_ids": input_ids, "lengths":lengths, "labels": labels}
+    return {"input_ids": input_ids, "lengths": lengths, "labels": labels}
+
 
 def tokenizes(examples):
     return hf_tokenizer(examples, truncation=True, max_length=128, padding="max_length")
-    
+
+
 def compute_metrics(results):
-	pred, targ = results
-	pred = np.argmax(pred, axis=-1)
-	res = {}
-	metric = evaluate.load("accuracy")
-	res["accuracy"] = metric.compute(predictions=pred, references=targ)["accuracy"]
-	metric = evaluate.load("precision")
-	res["precision"] = metric.compute(predictions=pred, references=targ, average="macro", zero_division=0)["precision"]
-	metric = evaluate.load("recall")
-	res["recall"] = metric.compute(predictions=pred, references=targ, average="macro", zero_division=0)["recall"]
-	metric = evaluate.load("f1")
-	res["f1"] = metric.compute(predictions=pred, references=targ, average="macro")["f1"]
-	return res
-	
-tokenized_train = (df_train["premise"] + " [CLS] " + df_train["hypothesis"]).apply(tokenizes)
-train_set = Dataset.from_dict({"input_ids":[t["input_ids"] for t in tokenized_train], "labels":df_train["label"]})
-tokenized_val = (df_val["premise"] + " [CLS] " + df_val["hypothesis"]).apply(tokenizes)
-val_set = Dataset.from_dict({"input_ids":[t["input_ids"] for t in tokenized_val], "labels":df_val["label"]})
+    pred, targ = results
+    pred = np.argmax(pred, axis=-1)
+    res = {}
+    metric = evaluate.load("accuracy")
+    res["accuracy"] = metric.compute(
+        predictions=pred, references=targ)["accuracy"]
+    metric = evaluate.load("precision")
+    res["precision"] = metric.compute(
+        predictions=pred, references=targ, average="macro", zero_division=0)["precision"]
+    metric = evaluate.load("recall")
+    res["recall"] = metric.compute(
+        predictions=pred, references=targ, average="macro", zero_division=0)["recall"]
+    metric = evaluate.load("f1")
+    res["f1"] = metric.compute(
+        predictions=pred, references=targ, average="macro")["f1"]
+    return res
+
+
+tokenized_train = (df_train["premise"] + " [CLS] " +
+                   df_train["hypothesis"]).apply(tokenizes)
+train_set = Dataset.from_dict(
+    {"input_ids": [t["input_ids"] for t in tokenized_train], "labels": df_train["label"]})
+tokenized_val = (df_val["premise"] + " [CLS] " +
+                 df_val["hypothesis"]).apply(tokenizes)
+val_set = Dataset.from_dict(
+    {"input_ids": [t["input_ids"] for t in tokenized_val], "labels": df_val["label"]})
 
 model = NLI(NLIConfig(vocab_size=len(hf_tokenizer.get_vocab())))
 
@@ -95,9 +108,9 @@ allparams = sum(p.numel() for p in model.parameters())
 trainparams = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("All Param:", allparams, "Train Params:", trainparams)
 args = TrainingArguments(output_dir="./NLIMODEL",
-                         load_best_model_at_end= True,
+                         load_best_model_at_end=True,
                          dataloader_pin_memory=True,
-                         per_device_train_batch_size=32,
+                         per_device_train_batch_size=8,
                          learning_rate=0.001,
                          weight_decay=0.01,
                          num_train_epochs=30,
