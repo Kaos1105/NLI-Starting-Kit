@@ -62,7 +62,7 @@ val_set = Dataset.from_dict({
 # We ignore the manual vocab_size because bert-small uses its own pre-trained vocab (30522)
 config = NLIConfig(
     vocab_size=hf_tokenizer.vocab_size,
-    hidden_size=256,  # Matches ELECTRA-small hidden size
+    hidden_size=128,  # Matches ELECTRA-small hidden size
     nclass=3
 )
 model = NLI(config)
@@ -92,15 +92,13 @@ args = TrainingArguments(
     per_device_eval_batch_size=16,
     gradient_accumulation_steps=1,
     fp16=True,                     # Faster training on GPU
-    learning_rate=3e-5,            # Small LR for BERT
+    learning_rate=2e-5,            # Small LR for BERT
     weight_decay=0.01,
     num_train_epochs=10,            # Transformers need fewer epochs
     eval_strategy="epoch",
     save_strategy="epoch",
     logging_steps=100,
     save_total_limit=1,
-    warmup_ratio=0.1,  # Spend first 10% of training "warming up"
-    lr_scheduler_type="cosine",  # Smoother decay than linear
 )
 
 trainer = Trainer(

@@ -16,7 +16,7 @@ def collate_fn(batch):
 
 
 def tokenizes(examples, tokenizer):
-    return tokenizer(examples, truncation=True, max_length=256, padding="max_length")
+    return tokenizer(examples, truncation=True, max_length=128, padding="max_length")
 
 
 class NLIConfig(PretrainedConfig):
