@@ -1,22 +1,20 @@
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pack_padded_sequence
+from transformers import PreTrainedModel, PretrainedConfig, AutoModel, AutoConfig
 from transformers.modeling_outputs import SequenceClassifierOutput
-from transformers import PreTrainedModel, PretrainedConfig
 
 
-# collate_fn is used by the Trainer to batch input dictionaries.
-# It converts a list of examples into tensors and pads the batch
-# by using the existing input length information.
 def collate_fn(batch):
-    input_ids = torch.tensor([x["input_ids"] for x in batch])
+    # test.py expects 'lengths', so we provide it even if the Transformer doesn't strictly need it
+    input_ids = torch.stack([torch.tensor(x["input_ids"]) for x in batch])
     lengths = torch.tensor([len(x["input_ids"]) for x in batch])
     labels = torch.tensor([int(x["labels"]) for x in batch])
-    return {"input_ids": input_ids, "lengths": lengths, "labels": labels}
+    # Create attention mask (1 for real tokens, 0 for [PAD])
+    # Assuming [PAD] token ID is 0 or 3 based on your original tokenizer
+    attention_mask = (input_ids != 3).long()
+    return {"input_ids": input_ids, "lengths": lengths, "labels": labels, "attention_mask": attention_mask}
 
 
-# This helper wraps a tokenizer call for fixed-length tokenization.
-# It is compatible with the existing test.py text-format input.
 def tokenizes(examples, tokenizer):
     return tokenizer(examples, truncation=True, max_length=128, padding="max_length")
 
@@ -24,7 +22,7 @@ def tokenizes(examples, tokenizer):
 class NLIConfig(PretrainedConfig):
     model_type = "NLI"
 
-    def __init__(self, vocab_size=20000, hidden_size=512, nclass=3, **kwargs):
+    def __init__(self, vocab_size=30522, hidden_size=512, nclass=3, **kwargs):
         super().__init__(**kwargs)
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
@@ -36,54 +34,28 @@ class NLI(PreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
-        self.config = config
+        # Load the architecture and weights of a pre-trained small BERT
+        self.bert = AutoModel.from_pretrained(
+            "prajjwal1/bert-small", use_safetensors=True)
 
-        # Embedding layer converts token ids to dense vectors.
-        self.embedding = nn.Embedding(config.vocab_size, config.hidden_size)
-
-        # Bidirectional LSTM captures both forward and backward context.
-        # We use hidden_size // 2 because bidirectional doubles the output dimension.
-        # num_layers=2 enables recurrent dropout between layers.
-        self.lstm = nn.LSTM(
-            input_size=config.hidden_size,
-            hidden_size=config.hidden_size // 2,
-            batch_first=True,
-            bidirectional=True,
-        )
-
-        # Small classifier head gives the model extra capacity after sequence encoding.
+        # Classifier head
         self.classifier = nn.Sequential(
-            nn.Dropout(0.2),
-            nn.Linear(config.hidden_size, config.hidden_size),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            nn.Linear(config.hidden_size, config.nclass),
+            nn.Dropout(0.1),
+            nn.Linear(self.bert.config.hidden_size, config.nclass)
         )
-
         self.loss_fct = nn.CrossEntropyLoss()
         self.post_init()
 
-    def forward(self, input_ids, lengths, labels=None, **kwargs):
-        # 1. Convert token ids to embeddings for the whole batch.
-        x = self.embedding(input_ids)
+    def forward(self, input_ids, lengths=None, labels=None, attention_mask=None, **kwargs):
+        # Generate mask if not provided (needed for compatibility with test.py)
+        if attention_mask is None:
+            attention_mask = (input_ids != 3).long()
 
-        # 2. Pack the padded sequence so LSTM ignores padding positions.
-        packed = pack_padded_sequence(
-            x,
-            lengths.to("cpu"),
-            batch_first=True,
-            enforce_sorted=False,
-        )
+        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
 
-        # 3. Run the bidirectional LSTM.
-        _, (h, _) = self.lstm(packed)
-
-        # h contains the final states for both directions.
-        # We concatenate forward and backward states to make a single vector.
-        h = torch.cat((h[-2], h[-1]), dim=-1)
-
-        # 4. Classify the final sentence representation into 3 labels.
-        logits = self.classifier(h)
+        # Use the [CLS] token representation for classification
+        pooled_output = outputs.last_hidden_state[:, 0, :]
+        logits = self.classifier(pooled_output)
 
         loss = None
         if labels is not None:
