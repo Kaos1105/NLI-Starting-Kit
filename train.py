@@ -19,7 +19,7 @@ df_val = mnli['validation_matched'].to_pandas().dropna()
 
 # 2. Setup Pre-trained Tokenizer (Transfer Learning)
 # Using 'bert-small' because it matches the 40M parameter constraint
-model_checkpoint = "prajjwal1/bert-small"
+model_checkpoint = "google/electra-small-discriminator"
 hf_tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
 
 # Save the tokenizer under MODEL/ for test.py to load
@@ -32,7 +32,7 @@ def tokenizes_data(text_list):
     return hf_tokenizer(
         text_list,
         truncation=True,
-        max_length=128,
+        max_length=256,
         padding="max_length"
     )
 
@@ -62,12 +62,12 @@ val_set = Dataset.from_dict({
 # We ignore the manual vocab_size because bert-small uses its own pre-trained vocab (30522)
 config = NLIConfig(
     vocab_size=hf_tokenizer.vocab_size,
-    hidden_size=512,  # Matches bert-small hidden size
+    hidden_size=256,  # Matches ELECTRA-small hidden size
     nclass=3
 )
 model = NLI(config)
 
-# Check parameters (bert-small is ~28M)
+# Check parameters (ELECTRA-small is ~28M)
 allparams = sum(p.numel() for p in model.parameters())
 print(f"Total Parameters: {allparams / 1e6:.2f}M")
 
@@ -88,17 +88,19 @@ args = TrainingArguments(
     load_best_model_at_end=True,
     metric_for_best_model="accuracy",
     greater_is_better=True,
-    per_device_train_batch_size=8,  # Increased for better stability
-    per_device_eval_batch_size=8,
-    gradient_accumulation_steps=2,
+    per_device_train_batch_size=16,  # Increased for better stability
+    per_device_eval_batch_size=16,
+    gradient_accumulation_steps=1,
     fp16=True,                     # Faster training on GPU
-    learning_rate=2e-5,            # Small LR for BERT
+    learning_rate=3e-5,            # Small LR for BERT
     weight_decay=0.01,
     num_train_epochs=10,            # Transformers need fewer epochs
     eval_strategy="epoch",
     save_strategy="epoch",
     logging_steps=100,
     save_total_limit=1,
+    warmup_ratio=0.1,  # Spend first 10% of training "warming up"
+    lr_scheduler_type="cosine",  # Smoother decay than linear
 )
 
 trainer = Trainer(
